@@ -34,6 +34,7 @@
   // * `types` - An array containing one or more of the supported types for the places request. Default: `['geocode']` See the full list [here](http://code.google.com/apis/maps/documentation/javascript/places.html#place_search_requests).
   // * `blur` - Trigger geocode when input loses focus.
   // * `geocodeAfterResult` - If blur is set to true, choose whether to geocode if user has explicitly selected a result before blur.
+  // * `restoreValueAfterBlur` - Restores the input's value upon blurring. Default is `false` which ignores the setting.
 
   var defaults = {
     bounds: true,
@@ -57,7 +58,8 @@
     maxZoom: 16,
     types: ['geocode'],
     blur: false,
-    geocodeAfterResult: false
+    geocodeAfterResult: false,
+    restoreValueAfterBlur: false
   };
 
   // See: [Geocoding Types](https://developers.google.com/maps/documentation/geocoding/#Types)
@@ -184,14 +186,14 @@
       );
 
       // Prevent parent form from being submitted if user hit enter.
-      this.$input.keypress(function(event){
+      this.$input.on('keypress.' + this._name, function(event){
         if (event.keyCode === 13){ return false; }
       });
 
       // Assume that if user types anything after having selected a result,
       // the selected location is not valid any more.
       if (this.options.geocodeAfterResult === true){
-        this.$input.bind('keypress', $.proxy(function(){
+        this.$input.bind('keypress.' + this._name, $.proxy(function(){
           if (event.keyCode != 9 && this.selected === true){
               this.selected = false;
           }
@@ -199,8 +201,13 @@
       }
 
       // Listen for "geocode" events and trigger find action.
-      this.$input.bind("geocode", $.proxy(function(){
+      this.$input.bind('geocode.' + this._name, $.proxy(function(){
         this.find();
+      }, this));
+
+      // Saves the previous input value
+      this.$input.bind('geocode:result.' + this._name, $.proxy(function(){
+        this.lastInputVal = this.$input.val();
       }, this));
 
       // Trigger find action when input element is blurred out and user has
@@ -208,9 +215,14 @@
       // (Useful for typing partial location and tabbing to the next field
       // or clicking somewhere else.)
       if (this.options.blur === true){
-        this.$input.blur($.proxy(function(){
-          if (this.options.geocodeAfterResult === true && this.selected === true){ return; }
-          this.find();
+        this.$input.on('blur.' + this._name, $.proxy(function(){
+          if (this.options.geocodeAfterResult === true && this.selected === true) { return; }
+
+          if (this.options.restoreValueAfterBlur === true && this.selected === true) {
+            setTimeout($.proxy(this.restoreLastValue, this), 0);
+          } else {
+            this.find();
+          }
         }, this));
       }
     },
@@ -269,6 +281,20 @@
       }
     },
 
+    destroy: function(){
+      if (this.map) {
+        google.maps.event.clearInstanceListeners(this.map);
+        google.maps.event.clearInstanceListeners(this.marker);
+      }
+
+      this.autocomplete.unbindAll();
+      google.maps.event.clearInstanceListeners(this.autocomplete);
+      google.maps.event.clearInstanceListeners(this.input);
+      this.$input.removeData();
+      this.$input.off(this._name);
+      this.$input.unbind('.' + this._name);
+    },
+
     // Look up a given address. If no `address` was specified it uses
     // the current value of the input.
     find: function(address){
@@ -319,6 +345,11 @@
       this.$input.val(firstResult);
 
       return firstResult;
+    },
+
+    // Restores the input value using the previous value if it exists
+    restoreLastValue: function() {
+      if (this.lastInputVal){ this.$input.val(this.lastInputVal); }
     },
 
     // Handles the geocode response. If more than one results was found
